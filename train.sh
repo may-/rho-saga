@@ -21,12 +21,13 @@ export PATH=/home/students/ohta/anaconda2/bin:$PATH
 #     $ /opt/slurm/bin/sbatch --output=<lof_file_name> --mem=<memoory_size> /path/to/train.sh <method_name> <solver_name> <num_epochs> <learning_rate> <data_name> <random_seed>
 #
 # - example
-#     $ /opt/slurm/bin/sbatch --output=logs/rcv1/train.log --mem=128GB /home/students/ohta/saga/train.sh bandit saga 10 1 rcv1 $RANDOM
+#     $ /opt/slurm/bin/sbatch --output=logs/rcv1/train.log --mem=400GB /home/students/ohta/saga/train.sh bandit saga 10 0.01 rcv1 $RANDOM
 #
 #
 #
 # Memory Size Hint for SAGA (for SGD, approx. half):
 #     mnist           -> 16GB
-#     news20, cpvtype -> 124GB
+#     covtype         -> 128GB
+#     news20          -> 256GB
 #     reuters4, rcv1  -> 400GB
 ###################################################################################################################

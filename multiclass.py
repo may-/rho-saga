@@ -55,17 +55,16 @@ def main(args):
     # set model
     print('\ncreating a model ...')
     sys.stdout.flush()
-    eta = 10 ** -args.learn_rate
     filename = '%s_%s_%d_' % (args.solver, args.method, args.seed)
     weights_path = None
     if args.weights_path:
         weights_path = os.path.join(args.weights_path, args.data_name, filename)
 
     if args.solver == 'sgd':
-        model = SGD(epochs=args.epochs, method=args.method, eta=eta,
+        model = SGD(epochs=args.epochs, method=args.method, eta=args.learn_rate,
                     eval_every=args.eval_every, cache_path=weights_path)
     elif args.solver == 'saga':
-        model = SAGA(epochs=args.epochs, method=args.method, eta=eta,
+        model = SAGA(epochs=args.epochs, method=args.method, eta=args.learn_rate,
                      eval_every=args.eval_every, cache_path=weights_path)
     else:
         raise ValueError('Solver %s not found. Abort.' % args.solver)
@@ -84,25 +83,16 @@ def main(args):
 
     save_path = os.path.join(args.results_path, args.data_name, filename)
     np.array(model.train_log).tofile(save_path + 'train.dat')
-    #np.array(model.train_reward).tofile(save_path + 'train_reward.dat')
     np.array(model.dev_log).tofile(save_path + 'dev.dat')
-    #np.array(model.dev_reward).tofile(save_path + 'dev_reward.dat')
     np.array(model.norm_log).tofile(save_path + 'norm.dat')
     np.array(model.variance_log).tofile(save_path + 'variance.dat')
-
-    #with open(save_path + 'model.pkl', 'wb') as output_file:
-    #     pickle.dump(model, output_file)
-
-    # plot
-    #print('plotting results ...')
-    #plot(train_scores, test_scores)
 
 
 if __name__ == "__main__":
 
     # parse args
     parser = argparse.ArgumentParser()
-    parser.add_argument("-l", "--learn_rate", default=1.0, type=float, help="learning rate (10**-g)")
+    parser.add_argument("-l", "--learn_rate", default=1.0, type=float, help="learning rate")
     parser.add_argument("-m", "--method", default='full', type=str, help="method name {full, greedy, bandit, cv}")
     parser.add_argument("-s", "--solver", default='saga', type=str, help="solver name {sgd, saga}")
     parser.add_argument("-e", "--epochs", default=10, type=int, help="number of epochs")

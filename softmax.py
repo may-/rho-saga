@@ -23,17 +23,27 @@ class SoftmaxRegression(BaseEstimator, ClassifierMixin):
     def _gradient(self, x, y):
         n_classes = y.shape[0]
 
+        # cast shape=(n,) -> shape=(1,n)
         if not isinstance(x, sp.csr.csr_matrix):
-            x = np.expand_dims(x, axis=0) # cast shape=(n,) -> shape=(1,n)
+            x = np.expand_dims(x, axis=0)
 
+        # probability
         p = self.predict_proba(x)
         y_hat = self.inference(p)
         p = p.reshape((n_classes,))
 
-        grad = np.zeros_like(self.W_)
+        # gradients
+        grad = np.zeros_like(self.W_)   # placeholder
         if self.method == 'full':
             for j in range(n_classes):
                 g = (p[j] - y[j]) * x
+                if isinstance(g, sp.csr.csr_matrix):
+                    g = g.toarray()
+                grad[j] = g
+
+        elif self.method == 'greedy':
+            for j in range(n_classes):
+                g = (p[j] - y_hat[j]) * x
                 if isinstance(g, sp.csr.csr_matrix):
                     g = g.toarray()
                 grad[j] = g
@@ -58,7 +68,7 @@ class SoftmaxRegression(BaseEstimator, ClassifierMixin):
                 grad[j] = g
 
         else:
-            raise ValueError('method %s not found. Abort.' % self.method)
+            raise ValueError('Method %s not found. Abort.' % self.method)
 
         return (y.argmax() != y_hat), grad
 
@@ -74,7 +84,7 @@ class SoftmaxRegression(BaseEstimator, ClassifierMixin):
         sys.stdout.flush()
 
         # check optimality
-        if self.dev_log[-1] >= self.best_score:
+        if self.dev_log[-1] <= self.best_score:
             self.best_score = self.dev_log[-1]
             self.best_W = self.W_
             self.stop_point = self.n_seen
@@ -126,6 +136,26 @@ class SoftmaxRegression(BaseEstimator, ClassifierMixin):
 
 
 class SGD(SoftmaxRegression):
+    """SGD solver for Softmax regression
+
+    Parameters
+    ----------
+    eta : float, default 0.1
+        Constant learning rate value.
+
+    epochs : int, default 10
+        Number of epochs.
+
+    method : str, {'full', 'greedy', 'bandit', 'cv'}, default 'full'
+        Method name.
+
+    eval_every : int, default 1000
+        Evaluate in every -- iterations.
+
+    cache_path : str, defalut None
+        Path to save weights & gradients. If ``None``, not saved.
+
+    """
     def __init__(self, eta=0.1, epochs=10, method='full',
                  eval_every=1000, cache_path=None):
         SoftmaxRegression.__init__(self, method)
@@ -156,7 +186,7 @@ class SGD(SoftmaxRegression):
             self.avg_feedback = 0.0
 
         self.best_W = np.zeros((n_classes, n_features))
-        self.best_score = 0.0
+        self.best_score = 1.0
         self.stop_point = 0
 
         # train loop
@@ -186,6 +216,26 @@ class SGD(SoftmaxRegression):
 
 
 class SAGA(SoftmaxRegression):
+    """SAGA solver for Softmax regression
+
+    Parameters
+    ----------
+    eta : float, default 0.1
+        Constant learning rate value.
+
+    epochs : int, default 10
+        Number of epochs.
+
+    method : str, {'full', 'greedy', 'bandit'}, default 'full'
+        Method name.
+
+    eval_every : int, default 1000
+        Evaluate in every -- iterations.
+
+    cache_path : str, defalut None
+        Path to save weights & gradients. If ``None``, not saved.
+
+    """
     def __init__(self, eta=0.1, epochs=10, method='full',
                  eval_every=1000, cache_path=None):
         SoftmaxRegression.__init__(self, method)
@@ -201,7 +251,7 @@ class SAGA(SoftmaxRegression):
         n_classes = Y_train.shape[1]
         self.W_ = np.zeros((n_classes, n_features))
         self.G_ = np.zeros((n_samples, n_classes, n_features))
-        grad = np.zeros((n_classes, n_features))
+        v = np.zeros((n_classes, n_features))
         avg_G = np.zeros((n_classes, n_features))
 
         self.cumulative_loss = 0.0
@@ -221,9 +271,9 @@ class SAGA(SoftmaxRegression):
         # train loop
         for epoch in range(self.epochs):
             # take average
-            if epoch == 1:
-                avg_G = np.mean(self.G_, axis=0)
-                assert avg_G.shape == self.W_.shape
+            #if epoch == 1:
+            #    avg_G = np.mean(self.G_, axis=0)
+            #    assert avg_G.shape == self.W_.shape
 
             # shuffle
             perm = np.random.permutation(n_samples)
@@ -231,15 +281,16 @@ class SAGA(SoftmaxRegression):
                 # compute gradients
                 loss, grad = self._gradient(X_train[i], Y_train[i])
 
-                if epoch == 0:                      # sgd update
-                    v = grad
-                else:                               # saga update
-                    v = grad - self.G_[i] + avg_G   # v = new - old + avg
-                    avg_G -= (1.0/n_samples) * (self.G_[i] - v)
+                #if epoch == 0:                      # sgd update
+                #    v = grad
+                #else:                               # saga update
+
+                v = grad - self.G_[i] + avg_G   # v = new - old + avg
+                avg_G -= (1.0/n_samples) * (self.G_[i] - grad) # update avg_G
 
                 # update
                 self.W_ -= self.eta * v             # update weights
-                self.G_[i] = v                      # update history table
+                self.G_[i] = grad                   # update history table
 
                 self.cumulative_loss += loss
                 self.n_seen += 1                    # update number of seen examples
@@ -248,9 +299,9 @@ class SAGA(SoftmaxRegression):
 
                 # evaluate
                 if self.n_seen % self.eval_every == 0:
-                    self.evaluate(X_dev, Y_dev, grad)
+                    self.evaluate(X_dev, Y_dev, v)
 
         # final results
-        self.evaluate(X_dev, Y_dev, grad)
+        self.evaluate(X_dev, Y_dev, v)
 
         return self
