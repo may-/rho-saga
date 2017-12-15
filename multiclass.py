@@ -2,6 +2,9 @@
 #
 # Reuters RCV1 text classification task
 #
+#   author: mayumi ohta <ohta@cl.uni-heidelberg.de>
+#   last update: 12. 12. 2017
+#
 ###########################################################
 
 
@@ -62,10 +65,10 @@ def main(args):
 
     if args.solver == 'sgd':
         model = SGD(epochs=args.epochs, method=args.method, eta=args.learn_rate,
-                    eval_every=args.eval_every, cache_path=weights_path)
+                    start_at=args.start_at, eval_every=args.eval_every, cache_path=weights_path)
     elif args.solver == 'saga':
         model = SAGA(epochs=args.epochs, method=args.method, eta=args.learn_rate,
-                     eval_every=args.eval_every, cache_path=weights_path)
+                     start_at=args.start_at, eval_every=args.eval_every, cache_path=weights_path)
     else:
         raise ValueError('Solver %s not found. Abort.' % args.solver)
 
@@ -76,8 +79,10 @@ def main(args):
     model.fit(data['train_x'], data['train_y'], data['test_x'], data['test_y'])
     end = time()
     print('done.\n')
-    print('train time: %f [sec.]' % (end - start))
-    print('stopping point: %f' % model.stop_point)
+    hours, remainder = divmod(end - start, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    print('train time: %d h %d m %d s' % (hours, minutes, seconds))
+    print('stopping point: %d' % model.stop_point)
     print('test score: %f' % model.best_score)
     sys.stdout.flush()
 
@@ -92,16 +97,17 @@ if __name__ == "__main__":
 
     # parse args
     parser = argparse.ArgumentParser()
-    parser.add_argument("-l", "--learn_rate", default=1.0, type=float, help="learning rate")
-    parser.add_argument("-m", "--method", default='full', type=str, help="method name {full, greedy, bandit, cv}")
-    parser.add_argument("-s", "--solver", default='saga', type=str, help="solver name {sgd, saga}")
+    parser.add_argument("-l", "--learn_rate", default=0.01, type=float, help="learning rate")
+    parser.add_argument("-m", "--method", default='bandit', type=str, help="method name, one of {full, greedy, bandit, cv}")
+    parser.add_argument("-s", "--solver", default='saga', type=str, help="solver name, one of {sgd, saga}")
     parser.add_argument("-e", "--epochs", default=10, type=int, help="number of epochs")
     parser.add_argument("-w", "--weights_path", type=str, default=None, help="path to dump weights")
     parser.add_argument("-r", "--results_path", type=str, default='results', help="path to save results")
     parser.add_argument("-f", "--file_path", type=str, default='data', help="path to data root")
-    parser.add_argument("-d", "--data_name", type=str, default='rcv1', help="data name {covtype, mnist, news20, rcv1}")
+    parser.add_argument("-d", "--data_name", type=str, default='rcv1', help="data name, one of {mnist, news20, rcv1, reuters4}")
     parser.add_argument("--seed", type=int, default=123, help="seed")
     parser.add_argument("--eval_every", type=int, default=1000, help="evaluate every * iterations")
+    parser.add_argument("--start_at", type=int, default=2, help="epoch index when to start using history")
     args = parser.parse_args()
 
     for k, v in vars(args).items():

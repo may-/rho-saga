@@ -2,6 +2,9 @@
 #
 # Softmax Regression
 #
+#   author: mayumi ohta <ohta@cl.uni-heidelberg.de>
+#   last update: 12. 12. 2017
+#
 ###########################################################
 
 
@@ -17,11 +20,37 @@ from sklearn.base import BaseEstimator, ClassifierMixin
 
 
 class SoftmaxRegression(BaseEstimator, ClassifierMixin):
-    def __init__(self, method='full'):
+    """Softmax Regression (a.k.a. multinomial regression)
+
+    Parameters
+    ----------
+    method : str, {'full', 'greedy', 'bandit', 'cv'}, default 'bandit'
+        Method name, specifies how to compute the gradients.
+
+    """
+    def __init__(self, method='bandit'):
         self.method = method
 
-    def _gradient(self, x, y):
-        n_classes = y.shape[0]
+    def _gradient(self, x, y, idx=None):
+        """Computes gradient
+
+        Parameters
+        ----------
+        x : {array-like, sparse matrix}, shape = [n_features,] or [1, n_features]
+            Set of dev samples used to determine the stopping point.
+
+        y : ndarray, shape = [n_classes,]
+            Corresponding gold labels.
+
+        Returns
+        -------
+        loss : bool
+            Zero-one loss (y.argmax() != y_hat)
+
+        grad : (dense) ndarray, shape = [n_classes, n_features]
+            Gradients.
+
+        """
 
         # cast shape=(n,) -> shape=(1,n)
         if not isinstance(x, sp.csr.csr_matrix):
@@ -30,28 +59,29 @@ class SoftmaxRegression(BaseEstimator, ClassifierMixin):
         # probability
         p = self.predict_proba(x)
         y_hat = self.inference(p)
-        p = p.reshape((n_classes,))
+        p = p.reshape((self.n_classes,))
 
         # gradients
         grad = np.zeros_like(self.W_)   # placeholder
         if self.method == 'full':
-            for j in range(n_classes):
+            for j in range(self.n_classes):
                 g = (p[j] - y[j]) * x
                 if isinstance(g, sp.csr.csr_matrix):
                     g = g.toarray()
                 grad[j] = g
 
-        elif self.method == 'greedy':
-            for j in range(n_classes):
-                g = (p[j] - y_hat[j]) * x
+        elif self.method == 'greedy':   # It's buggy!! Don't use this!!
+            for j in range(self.n_classes):
+                y_hat_ = 1 if j == y_hat else 0   # one-hot encoding (same as y_hat[j])
+                g = (p[j] - y_hat_) * x
                 if isinstance(g, sp.csr.csr_matrix):
                     g = g.toarray()
                 grad[j] = g
 
         elif self.method == 'bandit':
             y_tilde = np.random.multinomial(1, p)
-            feedback = (y.argmax() != y_tilde.argmax())
-            for j in range(n_classes):
+            feedback = int(y.argmax() != y_tilde.argmax())
+            for j in range(self.n_classes):
                 g = feedback * (y_tilde[j] - p[j]) * x
                 if isinstance(g, sp.csr.csr_matrix):
                     g = g.toarray()
@@ -59,10 +89,14 @@ class SoftmaxRegression(BaseEstimator, ClassifierMixin):
 
         elif self.method == 'cv':
             y_tilde = np.random.multinomial(1, p)
-            feedback = (y.argmax() != y_tilde.argmax())
-            self.avg_feedback += (feedback - self.avg_feedback)/(self.n_seen + 1.0)
-            for j in range(n_classes):
+            feedback = int(y.argmax() != y_tilde.argmax())
+            #if not np.isnan(self.feedback_history[idx]):    # if the table cell is filled already
+            if self.avg_feedback != 0.0:
+                self.avg_feedback += (feedback - self.feedback_history[idx])/self.n_samples # update avg
+            self.feedback_history[idx] = feedback           # update history table
+            for j in range(self.n_classes):
                 g = (feedback - self.avg_feedback) * (y_tilde[j] - p[j]) * x
+
                 if isinstance(g, sp.csr.csr_matrix):
                     g = g.toarray()
                 grad[j] = g
@@ -70,9 +104,24 @@ class SoftmaxRegression(BaseEstimator, ClassifierMixin):
         else:
             raise ValueError('Method %s not found. Abort.' % self.method)
 
-        return (y.argmax() != y_hat), grad
+        return int(y.argmax() != y_hat), grad
 
     def evaluate(self, X_dev, Y_dev, grad):
+        """Computes loss on the dev set
+            and stores the weights, gradients and function values(= losses)
+
+        Parameters
+        ----------
+        X_dev : {array-like, sparse matrix}, shape (n_samples, n_features)
+            Set of dev samples used to determine the stopping point.
+
+        Y_dev : array-like, shape (n_samples, n_classes)
+            Corresponding gold labels.
+
+        grad :
+            Gradients (updates).
+
+        """
         self.train_log.append(self.cumulative_loss / self.n_seen)
         self.dev_log.append(self.score(X_dev, Y_dev))
         self.norm_log.append(self.avg_norm)
@@ -100,6 +149,20 @@ class SoftmaxRegression(BaseEstimator, ClassifierMixin):
             np.savez_compressed(filename, w=w, g=g)
 
     def inference(self, p):
+        """MAP Inference of the label
+            If the prob is uniform, one class index will be randomly chosen
+
+        Parameters
+        ----------
+        p : ndarray, shape = [n_classes,]
+            Classwise probability
+
+        Returns
+        -------
+        y_hat : int
+            Argmax (class index) of the one-hot encoded MAP label
+
+        """
         y_hat = p.argmax() # Only the first occurrence is returned
         maxP = p.max()
         ind = np.where(p == maxP)[0]
@@ -119,17 +182,25 @@ class SoftmaxRegression(BaseEstimator, ClassifierMixin):
     def predict_log_proba(self, X):
         return np.log(self.predict_proba(X))
 
-    def score(self, X, Y):  # thus is equal to (1 - accuracy)
+    def score(self, X, Y):
+        """Computes task score: zero-one loss (= 1 - accuracy)
+        """
         Y_pred = self.predict(X)
         return zero_one_loss(Y.argmax(axis=1), Y_pred)
 
     def norm(self, g):
+        """Defines squared norm.
+        """
         return np.linalg.norm(g) ** 2
 
     def gradients_norm(self, grad):
+        """Computes gradient norm.
+        """
         self.avg_norm += (self.norm(grad) - self.avg_norm) / self.n_seen
 
     def variance(self, grad):
+        """Computes variance.
+        """
         self.avg_gradient += (grad - self.avg_gradient) / self.n_seen
         variance = self.norm(grad - self.avg_gradient)
         self.avg_variance += (variance - self.avg_variance) / self.n_seen
@@ -146,31 +217,88 @@ class SGD(SoftmaxRegression):
     epochs : int, default 10
         Number of epochs.
 
-    method : str, {'full', 'greedy', 'bandit', 'cv'}, default 'full'
+    method : str, {'full', 'greedy', 'bandit', 'cv'}, default 'bandit'
         Method name.
 
     eval_every : int, default 1000
         Evaluate in every -- iterations.
 
-    cache_path : str, defalut None
+    cache_path : str, default None
         Path to save weights & gradients. If ``None``, not saved.
 
     """
-    def __init__(self, eta=0.1, epochs=10, method='full',
-                 eval_every=1000, cache_path=None):
+    def __init__(self, eta=0.1, epochs=10, method='bandit',
+                 start_at=2, eval_every=1000, cache_path=None):
         SoftmaxRegression.__init__(self, method)
         self.eta = eta
         self.epochs = epochs
+        self.start_at = start_at
         self.eval_every = eval_every
         self.cache_path = cache_path
 
     def fit(self, X_train, Y_train, X_dev, Y_dev):
-        self.n_seen = 0
+        """Optimize weights.
 
-        n_samples, n_features = X_train.shape
-        n_classes = Y_train.shape[1]
-        self.W_ = np.zeros((n_classes, n_features))  # initialize weights
-        grad = np.zeros((n_classes, n_features))
+        Parameters
+        ----------
+        X_train : {array-like, sparse matrix}, shape = [n_samples, n_features]
+            Set of train samples, where n_samples is the number of samples and
+            n_features is the number of features.
+
+        Y_train : array-like, shape = [n_samples, n_classes]
+            Corresponding gold labels, where n_samples is the number of samples and
+            n_classes is the number of classes.
+
+        X_dev : {array-like, sparse matrix}, shape = [n_samples, n_features]
+            Set of dev samples used to determine the stopping point.
+
+        Y_dev : array-like, shape (n_samples, n_classes)
+            Corresponding gold labels.
+
+        Attributes
+        ----------
+        W_ : ndarray, shape = [n_classes, n_features]
+            Current weights.
+
+        n_seen : int
+            Number of examples seen so far.
+
+        cumulative_loss : float
+            Cumulative train loss.
+
+        train_log : list of float
+            List of train loss(= 1 - accuracy) in each iteration so far.
+
+        dev_log : list of float
+            List of dev loss(= 1 - accuracy) in each iteration so far.
+
+        norm_log : list of float
+            List of gradient norm in each iteration so far.
+
+        variance_log : list of float
+            List of variance in each iteration so far.
+
+        best_W : ndarray, shape = [n_classes, n_features]
+            Weights at the stopping point.
+
+        best_score : float
+            Loss value at the stopping point
+
+        stop_point : int
+            Iteration index which returns the lowest loss value
+
+        Returns
+        -------
+        self : object
+            Returns self.
+
+        """
+        self.n_seen = 1
+
+        self.n_samples, self.n_features = X_train.shape
+        self.n_classes = Y_train.shape[1]
+        self.W_ = np.zeros((self.n_classes, self.n_features))  # initialize weights
+        grad = np.zeros((self.n_classes, self.n_features))
 
         self.cumulative_loss = 0.0
         self.train_log = []
@@ -184,30 +312,36 @@ class SGD(SoftmaxRegression):
 
         if self.method == 'cv':
             self.avg_feedback = 0.0
+            self.feedback_history = np.empty((self.n_samples,))
+            self.feedback_history[:] = np.nan
 
-        self.best_W = np.zeros((n_classes, n_features))
+        self.best_W = np.zeros((self.n_classes, self.n_features))
         self.best_score = 1.0
         self.stop_point = 0
 
         # train loop
         for epoch in range(self.epochs):
+            if self.method == 'cv' and epoch == self.start_at:
+                self.avg_feedback = np.mean(self.feedback_history)
+
             # shuffle
-            perm = np.random.permutation(n_samples)
+            perm = np.random.permutation(self.n_samples)
             for i in perm:
                 # compute avg gradients
-                loss, grad = self._gradient(X_train[i], Y_train[i])
+                loss, grad = self._gradient(X_train[i], Y_train[i], idx=i)
 
                 # update
                 self.W_ -= self.eta * grad          # update weights
 
                 self.cumulative_loss += loss
-                self.n_seen += 1                    # update number of seen examples
                 self.gradients_norm(grad)           # update avg_norm
                 self.variance(grad)                 # update avg_variance
 
                 # evaluate
                 if self.n_seen % self.eval_every == 0:
                     self.evaluate(X_dev, Y_dev, grad)
+
+                self.n_seen += 1                    # update number of seen examples
 
         # final results
         self.evaluate(X_dev, Y_dev, grad)
@@ -226,33 +360,94 @@ class SAGA(SoftmaxRegression):
     epochs : int, default 10
         Number of epochs.
 
-    method : str, {'full', 'greedy', 'bandit'}, default 'full'
-        Method name.
+    method : str, {'full', 'greedy', 'bandit'}, default 'bandit'
+        Method name, specifies how to compute the gradients.
+
+    start_at : int, default 2
+        Epoch index when to start SAGA update. If set to 0, it starts
+        computing average from the partially filled table.
 
     eval_every : int, default 1000
         Evaluate in every -- iterations.
 
-    cache_path : str, defalut None
+    cache_path : str, default None
         Path to save weights & gradients. If ``None``, not saved.
 
     """
-    def __init__(self, eta=0.1, epochs=10, method='full',
+    def __init__(self, eta=0.1, epochs=10, method='bandit', start_at=2,
                  eval_every=1000, cache_path=None):
         SoftmaxRegression.__init__(self, method)
         self.eta = eta
         self.epochs = epochs
+        self.start_at = start_at
         self.eval_every = eval_every
         self.cache_path = cache_path
 
     def fit(self, X_train, Y_train, X_dev, Y_dev):
-        self.n_seen = 0
+        """Optimize weights.
 
-        n_samples, n_features = X_train.shape
-        n_classes = Y_train.shape[1]
-        self.W_ = np.zeros((n_classes, n_features))
-        self.G_ = np.zeros((n_samples, n_classes, n_features))
-        v = np.zeros((n_classes, n_features))
-        avg_G = np.zeros((n_classes, n_features))
+        Parameters
+        ----------
+        X_train : {array-like, sparse matrix}, shape = [n_samples, n_features]
+            Set of train samples, where n_samples is the number of samples and
+            n_features is the number of features.
+
+        Y_train : array-like, shape = [n_samples, n_classes]
+            Corresponding gold labels, where n_samples is the number of samples and
+            n_classes is the number of classes.
+
+        X_dev : {array-like, sparse matrix}, shape = [n_samples, n_features]
+            Set of dev samples used to determine the stopping point.
+
+        Y_dev : array-like, shape (n_samples, n_classes)
+            Corresponding gold labels.
+
+        Attributes
+        ----------
+        W_ : ndarray, shape = [n_classes, n_features]
+            Current weights.
+
+        n_seen : int
+            Number of examples seen so far.
+
+        cumulative_loss : float
+            Cumulative train loss.
+
+        train_log : list of float
+            List of train loss(= 1 - accuracy) in each iteration so far.
+
+        dev_log : list of float
+            List of dev loss(= 1 - accuracy) in each iteration so far.
+
+        norm_log : list of float
+            List of gradient norm in each iteration so far.
+
+        variance_log : list of float
+            List of variance in each iteration so far.
+
+        best_W : ndarray, shape = [n_classes, n_features]
+            Weights at the stopping point.
+
+        best_score : float
+            Loss value at the stopping point
+
+        stop_point : int
+            Iteration index which returns the lowest loss value
+
+        Returns
+        -------
+        self : object
+            Returns self.
+
+        """
+        self.n_seen = 1
+
+        self.n_samples, self.n_features = X_train.shape
+        self.n_classes = Y_train.shape[1]
+        self.W_ = np.zeros((self.n_classes, self.n_features))
+        self.G_ = np.zeros((self.n_samples, self.n_classes, self.n_features))
+        v = np.zeros((self.n_classes, self.n_features))
+        avg_G = np.zeros((self.n_classes, self.n_features))
 
         self.cumulative_loss = 0.0
         self.train_log = []
@@ -264,42 +459,41 @@ class SAGA(SoftmaxRegression):
         self.avg_norm = 0.0                         # (avg over T, not N)
         self.avg_variance = 0.0                     # (avg over T, not N)
 
-        self.best_W = np.zeros((n_classes, n_features))
-        self.best_score = 0.0
+        self.best_W = np.zeros((self.n_classes, self.n_features))
+        self.best_score = 1.0
         self.stop_point = 0
 
         # train loop
         for epoch in range(self.epochs):
-            # take average
-            #if epoch == 1:
-            #    avg_G = np.mean(self.G_, axis=0)
-            #    assert avg_G.shape == self.W_.shape
+            if epoch == self.start_at:
+                avg_G = np.mean(self.G_, axis=0)
 
             # shuffle
-            perm = np.random.permutation(n_samples)
+            perm = np.random.permutation(self.n_samples)
             for i in perm:
                 # compute gradients
                 loss, grad = self._gradient(X_train[i], Y_train[i])
 
-                #if epoch == 0:                      # sgd update
-                #    v = grad
-                #else:                               # saga update
-
-                v = grad - self.G_[i] + avg_G   # v = new - old + avg
-                avg_G -= (1.0/n_samples) * (self.G_[i] - grad) # update avg_G
+                if epoch < self.start_at:               # sgd update
+                    v = grad
+                else:                                   # saga update
+                    v = grad - self.G_[i] + avg_G       # v = new - old + avg
+                    n = self.n_seen if self.n_seen < self.n_samples else self.n_samples # =min(n_seen, n_samples)
+                    avg_G += (grad - self.G_[i]) / n    # update avg_G
 
                 # update
                 self.W_ -= self.eta * v             # update weights
                 self.G_[i] = grad                   # update history table
 
                 self.cumulative_loss += loss
-                self.n_seen += 1                    # update number of seen examples
                 self.gradients_norm(v)              # update avg_norm
                 self.variance(v)                    # update avg_variance
 
                 # evaluate
                 if self.n_seen % self.eval_every == 0:
                     self.evaluate(X_dev, Y_dev, v)
+
+                self.n_seen += 1                    # update number of seen examples
 
         # final results
         self.evaluate(X_dev, Y_dev, v)

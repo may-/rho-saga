@@ -2,6 +2,9 @@
 #
 # Data loader
 #
+#   author: mayumi ohta <ohta@cl.uni-heidelberg.de>
+#   last update: 12. 12. 2017
+#
 ###########################################################
 
 
@@ -71,7 +74,7 @@ def extract_labels(filename):
 
 
 def load_mnist(work_directory):
-    #s = {'train': 60000, 'test': 10000, 'dim': 784, 'k': 10}
+    s = {'train': 60000, 'dev': 5000, 'test': 5000, 'dim': 784, 'k': 10}
     data = {}
     source_url = 'http://yann.lecun.com/exdb/mnist/'
     
@@ -100,8 +103,10 @@ def load_mnist(work_directory):
     
     data['train_x'] = mnist.train.images
     data['train_y'] = mnist.train.labels
-    data['test_x'] = mnist.test.images
-    data['test_y'] = mnist.test.labels
+    data['test_x'] = mnist.test.images[:s['test']]
+    data['test_y'] = mnist.test.labels[:s['test']]
+    data['dev_x'] = mnist.test.images[s['dev']:]
+    data['dev_y'] = mnist.test.labels[s['dev']:]
     
     return data
 
@@ -110,7 +115,7 @@ def load_reuters4(work_directory):
     d = np.load(os.path.join(work_directory, '4classes.npz'))
     X_train, Y_train = d['train']
     X_test0, Y_test0 = d['test0']
-    #X_test1, Y_test1 = d['test1']
+    X_test1, Y_test1 = d['test1']
     #X_test2, Y_test2 = d['test2']
     #X_test3, Y_test3 = d['test3']
     #data = {
@@ -120,21 +125,23 @@ def load_reuters4(work_directory):
     #    'test_y': Y_train
     #}
     data = {
-        'train_x': X_test0,
-        'train_y': Y_test0,
-        'test_x': X_train,
-        'test_y': Y_train
+        'train_x': X_train,
+        'train_y': Y_train,
+        'test_x': X_test0,
+        'test_y': Y_test0,
+        'dev_x': X_test1,
+        'dev_y': Y_test1
     }
     return data
 
 
 def load_rcv1(work_directory):
-    s = {'train': 15564, 'test': 518571, 'dim': 47236, 'k': 51}
+    s = {'train': 15564, 'dev': 518571, 'dim': 47236, 'k': 51}
     data = {}
     
     # load
-    for data_name in ['train', 'test']:
-        filename = 'rcv1_'+data_name+'.multiclass.bz2'
+    for data_name, t in zip(['train', 'dev'], ['train', 'test']):
+        filename = 'rcv1_'+t+'.multiclass.bz2'
         filepath = maybe_download(filename, work_directory)
         print('Extracting', filepath)
         sys.stdout.flush()
@@ -146,7 +153,7 @@ def load_rcv1(work_directory):
     lb = LabelBinarizer()
     lb.fit(data['train_y'])
     data['train_y'] = lb.transform(data['train_y'])
-    data['test_y'] = lb.transform(data['test_y'])
+    data['dev_y'] = lb.transform(data['dev_y'])
 
     #unique = list(np.unique(data['train_y']))
     #data['train_y'] = one_hot_encoding(data['train_y'], unique)
@@ -155,8 +162,8 @@ def load_rcv1(work_directory):
     # check shape
     assert data['train_x'].shape == (s['train'], s['dim']), data['train_x'].shape
     assert data['train_y'].shape == (s['train'], s['k']), data['train_y'].shape
-    assert data['test_x'].shape == (s['test'], s['dim']), data['test_x'].shape
-    assert data['test_y'].shape == (s['test'], s['k']), data['test_y'].shape
+    assert data['dev_x'].shape == (s['dev'], s['dim']), data['dev_x'].shape
+    assert data['dev_y'].shape == (s['dev'], s['k']), data['dev_y'].shape
 
     return data
 
@@ -166,7 +173,7 @@ def load_news20(work_directory):
     data = {}
     
     # load
-    for data_name, t in zip(['train', 'test'], ['', '.t']):
+    for data_name, t in zip(['train', 'dev'], ['', '.t']):
         filename = 'news20'+t+'.scale.bz2'
         filepath = maybe_download(filename, work_directory)
         print('Extracting', filepath)
@@ -179,16 +186,16 @@ def load_news20(work_directory):
     lb = LabelBinarizer()
     lb.fit(data['train_y'])
     data['train_y'] = lb.transform(data['train_y'])
-    data['test_y'] = lb.transform(data['test_y'])
+    data['dev_y'] = lb.transform(data['dev_y'])
     #unique = list(np.unique(data['train_y']))
     #data['train_y'] = one_hot_encoding(data['train_y'], unique)
     #data['test_y'] = one_hot_encoding(data['test_y'], unique)
 
     # reshape (pad with zero)
-    data['test_x'] = sp.csr_matrix((data['test_x'].data,
-                                    data['test_x'].indices,
-                                    data['test_x'].indptr),
-                                   shape=(s['test'], s['dim']))
+    data['dev_x'] = sp.csr_matrix((data['dev_x'].data,
+                                   data['dev_x'].indices,
+                                   data['dev_x'].indptr),
+                                   shape=(s['dev'], s['dim']))
 
     # check shape
     assert data['train_x'].shape == (s['train'], s['dim'])

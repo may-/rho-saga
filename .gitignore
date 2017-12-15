@@ -1,7 +1,8 @@
-logs/
-results/
-weights/
+logs/*/*.log
+results/*/*.dat
+weights/*/*.npz
 data/
+old*/
 .ipynb_checkpoints
 __pycache__
 *.pyc
